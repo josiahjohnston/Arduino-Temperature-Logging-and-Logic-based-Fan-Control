@@ -54,14 +54,17 @@ unsigned long fan_on_time;
 unsigned long fan_on_duration;
 const unsigned long fan_on_response = 10 * 1000; // fans kick on for this many milliseconds at a time.
 byte fan_speed;
+byte serial_fan_override;
 const float delta_temp_threshold = 11.0;
-const float delta_temp_maxout = 25.0;
+const float delta_temp_maxout = 40.0;
 const byte min_fan_speed = 60;
 const byte max_fan_speed = 111;
 
 
 
-
+float pow_e( float x ) {
+  return pow(x,2.718281828);
+}
 
 
 void setup() {
@@ -83,7 +86,8 @@ void setup() {
   fan_on_duration = 0;
   fan_on_time = 0;
   fan_speed = 0;
-
+  serial_fan_override = 0;
+  
   // Initialize the fan control pin
   pinMode(fan_control_pin, OUTPUT);
   analogWrite(fan_control_pin, fan_speed);
@@ -144,20 +148,14 @@ void loop() {
   if( num_loops_since_temp_col_header >= 30 ) { num_loops_since_temp_col_header = 0; }
   if( num_loops_since_temp_col_header == 0 ) {
     Serial.println("");
-    Serial.print("Date: ");
-    Serial.print(month());
-    Serial.print(" ");
-    Serial.print(day());
-    Serial.print(", ");
-    Serial.println(year());
-    Serial.println("                                ... Sensor heights (in inches)");
+    Serial.println("Sensor temps (in F)...");
     Serial.print(  "Timestamp, FanSpeed, OutdoorTemp");
     for( sensor_idx = 0; sensor_idx < NUM_ROOM_SENSORS; sensor_idx++ ) {
-      Serial.print(",  ");
+      Serial.print(",  Temp@");
       Serial.print(heights[sensor_idx]);
+      Serial.print("in");
     }
     Serial.println("");
-    Serial.println("Sensor temps (in F)...");
   }
   
   // Read sensors and record min & max
@@ -172,20 +170,21 @@ void loop() {
       temps[sensor_idx] = sensors.getTempC(addr);
       read_attempts++;
     } while (temps[sensor_idx] == DEVICE_DISCONNECTED  && read_attempts < 10); }
-    if( read_attempts >= 10 ) { 
+    if( temps[sensor_idx] == DEVICE_DISCONNECTED ) { 
       Serial.println("");
       Serial.print(read_attempts);
       Serial.print(" read failures on sensor ");
       Serial.println(sensor_idx);
-    } else if( temps[sensor_idx] != DEVICE_DISCONNECTED ) {
+    } else {
       if( num_valid_readings == 0 ) {
           temp_min = temps[sensor_idx];
           temp_max = temps[sensor_idx];
+      } else {
+        if( temp_min > temps[sensor_idx] ) temp_min = temps[sensor_idx];
+        if( temp_max < temps[sensor_idx] ) temp_max = temps[sensor_idx];
       }
       num_valid_readings++;
     }
-    if( temp_min > temps[sensor_idx] ) temp_min = sensors.toFahrenheit(temps[sensor_idx]);
-    if( temp_max < temps[sensor_idx] ) temp_max = sensors.toFahrenheit(temps[sensor_idx]);
   }
   // Read outdoor temperature
   memcpy(addr, outdoor_temp_sensor_addr, ADDR_LEN );
@@ -205,16 +204,26 @@ void loop() {
 
   // If the temperature difference is more than the threshold, update fan control settings for so many seconds. Also do a reality check on the reading.
 #ifndef LOG_ONLY
-  if( (temp_max - temp_min) > delta_temp_threshold ) {
+  if( ( 9.0/5.0*(temp_max - temp_min) > delta_temp_threshold )  && ( serial_fan_override == 0 ) ) {
     fan_on_duration = fan_on_response;
     fan_on_time = millis();
-    if( (temp_max - temp_min) > delta_temp_maxout ) {
+    if( 9.0/5.0*(temp_max - temp_min) > delta_temp_maxout ) {
       fan_speed = max_fan_speed;
     } else {
-      fan_speed = (byte)( ((float)min_fan_speed) + ((float)(max_fan_speed - min_fan_speed)) * ((float)(temp_max - temp_min - delta_temp_threshold)) /  ((float) delta_temp_maxout - delta_temp_threshold) );
+// Linear
+//      fan_speed = (byte)( ((float)min_fan_speed) + ((float)(max_fan_speed - min_fan_speed)) * (9.0/5.0*(temp_max - temp_min) - delta_temp_threshold) /  (delta_temp_maxout - delta_temp_threshold) );
+// power, ratio^e
+      fan_speed = (byte)( ((float)min_fan_speed) + ((float)(max_fan_speed - min_fan_speed)) * pow_e((9.0/5.0*(temp_max - temp_min) - delta_temp_threshold) /  (delta_temp_maxout - delta_temp_threshold) ));
     }
-    analogWrite(fan_control_pin, fan_speed);
+    serial_fan_override = 0;
   }
+  // Check if its time to turn the fan OFF
+  if( ( fan_on_duration > 0 ) && ( fan_on_duration + fan_on_time <= millis() ) ) {
+    fan_on_duration = 0;
+    fan_speed = 0;
+    serial_fan_override = 0;
+  }
+  analogWrite(fan_control_pin, fan_speed);
 #endif
 
   // Print out system state to the serial port & log file
@@ -238,6 +247,7 @@ void loop() {
     Serial.print( "ERR" );
   } else {
     Serial.print( sensors.toFahrenheit(outdoor_temp) );
+//    Serial.print( outdoor_temp );
   }
   for( sensor_idx = 0; sensor_idx < NUM_ROOM_SENSORS; sensor_idx++ ) {
     Serial.print(",  ");
@@ -245,6 +255,7 @@ void loop() {
       Serial.print( "ERR" );
     } else {
       Serial.print( sensors.toFahrenheit(temps[sensor_idx]) );
+//      Serial.print( temps[sensor_idx] );
     }
   }
   Serial.println("");
@@ -273,6 +284,7 @@ void loop() {
       dataFile.print( "ERR" );
     } else {
       dataFile.print(sensors.toFahrenheit(outdoor_temp));
+//      dataFile.print(outdoor_temp);
     }
     for( sensor_idx = 0; sensor_idx < NUM_ROOM_SENSORS; sensor_idx++ ) {
       dataFile.print(",");
@@ -280,6 +292,7 @@ void loop() {
         dataFile.print( "ERR" );
       } else {
         dataFile.print( sensors.toFahrenheit(temps[sensor_idx]) );
+//        dataFile.print( temps[sensor_idx] );
       }
     }
     dataFile.println("");
@@ -289,17 +302,6 @@ void loop() {
   } 
 #endif
 
-  // Check if its time to turn the fan OFF
-#ifndef LOG_ONLY
-  if( ( fan_on_duration > 0 ) && ( fan_on_duration + fan_on_time <= millis() ) ) {
-    fan_on_duration = 0;
-    fan_speed = 0;
-    analogWrite(fan_control_pin, fan_speed);
-    return;
-  }
-  analogWrite(fan_control_pin, fan_speed);
-#endif
-  delay(700);
   
   /* Fan controlled via incoming serial data 
        Look for incoming fan speeds. When 3-digit numbers come in, update fan speeds in 30-second bursts.
@@ -340,6 +342,7 @@ void loop() {
         fan_on_time = millis();
         /* Analog controlled PWM with frequency defined in setup(). */
         analogWrite(fan_control_pin, fan_speed);
+        serial_fan_override = 1;
         // Report status
         Serial.print("Fan speed set to ");
         Serial.println(fan_speed);
@@ -347,5 +350,6 @@ void loop() {
 #endif
     }      
   } 
+  delay(700);
 }
 
