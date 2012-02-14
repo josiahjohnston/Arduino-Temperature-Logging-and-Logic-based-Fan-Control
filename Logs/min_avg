@@ -1,19 +1,19 @@
 #!/sw/bin/awk -f
-# This awk script cleans up a file that excel screwed up.
-# The data originally had second resolution on its timestamps that Excel truncated to minute resoluion.
-# This script averages all of the readings in a minute and prints the averages out.
-# It expects a tab or space delimited file with Unix-style line endings.
+# This script averages all of the readings that occured in the same minute.
+# It expects a comma delimited file with Unix-style line endings.
 
 BEGIN { 
-  num_temps = 6;
-  temp_start_col = 3;
+  num_temps = 7;
+  temp_start_col = 2;
   last_timestamp=0;
-  num_header_lines=1;
+  num_header_lines=0;
+  FS=","; 
 }
 
 { 
   if( NR > num_header_lines ) {
-    cur_timestamp=($1" "$2);
+    cur_timestamp=$1;
+    sub(/\:[0-9]+\"$/, "\"", cur_timestamp);
     if( last_timestamp != cur_timestamp ) {
       # Print the average of the prior readings if we have any
       if( last_timestamp != 0 ) {

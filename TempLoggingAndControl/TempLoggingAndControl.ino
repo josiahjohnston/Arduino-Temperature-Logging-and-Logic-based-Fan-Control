@@ -5,7 +5,7 @@
 #include <DS1307RTC.h>
 
 #define USE_SD
-#define LOG_ONLY
+//#define LOG_ONLY
 
 #ifdef USE_SD
 #include <SD.h>
@@ -135,8 +135,8 @@ void setup() {
 void loop() {
   int incomingByte;
   char command;
+  int num_valid_readings;
   /* Sensor variables */
-  float temp;
   float temp_min;
   float temp_max;
 
@@ -161,6 +161,7 @@ void loop() {
   }
   
   // Read sensors and record min & max
+  num_valid_readings = 0;
   sensors.requestTemperatures();
   for( sensor_idx = 0; sensor_idx < NUM_ROOM_SENSORS; sensor_idx++ ) {
     memcpy(addr, room_temp_sensor_addr[sensor_idx], ADDR_LEN );
@@ -176,14 +177,15 @@ void loop() {
       Serial.print(read_attempts);
       Serial.print(" read failures on sensor ");
       Serial.println(sensor_idx);
+    } else if( temps[sensor_idx] != DEVICE_DISCONNECTED ) {
+      if( num_valid_readings == 0 ) {
+          temp_min = temps[sensor_idx];
+          temp_max = temps[sensor_idx];
+      }
+      num_valid_readings++;
     }
-    temps[sensor_idx] = sensors.toFahrenheit(temps[sensor_idx]);
-    if( sensor_idx == 0 ) {
-        temp_min = temps[sensor_idx];
-        temp_max = temps[sensor_idx];
-    }
-    if( temp_min > temps[sensor_idx] ) temp_min = temps[sensor_idx];
-    if( temp_max < temps[sensor_idx] ) temp_max = temps[sensor_idx];
+    if( temp_min > temps[sensor_idx] ) temp_min = sensors.toFahrenheit(temps[sensor_idx]);
+    if( temp_max < temps[sensor_idx] ) temp_max = sensors.toFahrenheit(temps[sensor_idx]);
   }
   // Read outdoor temperature
   memcpy(addr, outdoor_temp_sensor_addr, ADDR_LEN );
@@ -197,9 +199,8 @@ void loop() {
   if( read_attempts >= 10 ) { 
     Serial.println("");
     Serial.print(read_attempts);
-    Serial.print(" read failures on outdoor sensor.");
+    Serial.println(" read failures on outdoor sensor.");
   }
-  outdoor_temp = sensors.toFahrenheit(outdoor_temp);
   num_loops_since_temp_col_header++;
 
   // If the temperature difference is more than the threshold, update fan control settings for so many seconds. Also do a reality check on the reading.
@@ -213,6 +214,7 @@ void loop() {
       fan_speed = (byte)( ((float)min_fan_speed) + ((float)(max_fan_speed - min_fan_speed)) * ((float)(temp_max - temp_min - delta_temp_threshold)) /  ((float) delta_temp_maxout - delta_temp_threshold) );
     }
     analogWrite(fan_control_pin, fan_speed);
+  }
 #endif
 
   // Print out system state to the serial port & log file
@@ -232,10 +234,18 @@ void loop() {
   Serial.print(",  ");
   Serial.print(fan_speed);
   Serial.print(",  ");
-  Serial.print(outdoor_temp);
+  if( outdoor_temp == DEVICE_DISCONNECTED ) {
+    Serial.print( "ERR" );
+  } else {
+    Serial.print( sensors.toFahrenheit(outdoor_temp) );
+  }
   for( sensor_idx = 0; sensor_idx < NUM_ROOM_SENSORS; sensor_idx++ ) {
     Serial.print(",  ");
-    Serial.print( temps[sensor_idx] );
+    if( temps[sensor_idx] == DEVICE_DISCONNECTED ) {
+      Serial.print( "ERR" );
+    } else {
+      Serial.print( sensors.toFahrenheit(temps[sensor_idx]) );
+    }
   }
   Serial.println("");
 
@@ -259,10 +269,18 @@ void loop() {
     dataFile.print(",");
     dataFile.print(fan_speed);
     dataFile.print(",");
-    dataFile.print(outdoor_temp);
+    if( outdoor_temp == DEVICE_DISCONNECTED ) {
+      dataFile.print( "ERR" );
+    } else {
+      dataFile.print(sensors.toFahrenheit(outdoor_temp));
+    }
     for( sensor_idx = 0; sensor_idx < NUM_ROOM_SENSORS; sensor_idx++ ) {
       dataFile.print(",");
-      dataFile.print( temps[sensor_idx] );
+      if( temps[sensor_idx] == DEVICE_DISCONNECTED ) {
+        dataFile.print( "ERR" );
+      } else {
+        dataFile.print( sensors.toFahrenheit(temps[sensor_idx]) );
+      }
     }
     dataFile.println("");
     dataFile.close();
