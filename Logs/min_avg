@@ -3,8 +3,8 @@
 # It expects a comma delimited file with Unix-style line endings.
 
 BEGIN { 
-  num_temps = 7;
-  temp_start_col = 2;
+  num_dat_cols = 8;
+  dat_start_col = 2;
   last_timestamp=0;
   num_header_lines=0;
   FS=","; 
@@ -18,22 +18,28 @@ BEGIN {
       # Print the average of the prior readings if we have any
       if( last_timestamp != 0 ) {
         printf "%s\t",last_timestamp;
-        for(i=1; i<=num_temps; i++) {
-          printf "%.2f\t", (readings[i]/num_readings);
+        for(i=1; i<=num_dat_cols; i++) {
+          printf "%.2f\t", (readings[i]/num_readings[i]);
         }
         printf "\n";
       }
       # Initialize the readings
-      for(i=1; i<=num_temps; i++) {
-        readings[i]=$(temp_start_col + i);
+      for(i=1; i<=num_dat_cols; i++) {
+        readings[i]=$(dat_start_col + i - 1);
+        if(readings[i]!="ERR") {
+          num_readings[i] = 1;
+        } else {
+          num_readings[i] = 0;
+        }
       }
-      num_readings=1;
       last_timestamp = cur_timestamp;
     } else {
-      for(i=1; i<=num_temps; i++) {
-        readings[i]+=$(temp_start_col + i);
+      for(i=1; i<=num_dat_cols; i++) {
+        if($(dat_start_col + i - 1) != "ERR") {
+          num_readings[i]++;
+          readings[i]+=$(dat_start_col + i - 1);
+        }
       }
-      num_readings++;
     }
   }
 }
@@ -42,8 +48,8 @@ END {
 # Print out the last readings
   if( last_timestamp != 0 ) {
     printf "%s\t",last_timestamp;
-    for(i=1; i<=num_temps; i++) {
-      printf "%.2f\t", (readings[i]/num_readings);
+    for(i=1; i<=num_dat_cols; i++) {
+      printf "%.2f\t", (readings[i]/num_readings[i]);
     }
     printf "\n";
   }
