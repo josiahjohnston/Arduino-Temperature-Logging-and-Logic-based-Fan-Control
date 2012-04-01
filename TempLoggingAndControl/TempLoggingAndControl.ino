@@ -6,6 +6,7 @@
 
 #define USE_SD
 //#define LOG_ONLY
+#define NO_OUTDOOR
 
 #ifdef USE_SD
 #include <SD.h>
@@ -31,12 +32,30 @@ byte read_attempts;
 #define ADDR_LEN 8
 /* Sensor addresses, ordered by their height from the floor (highest to lowest) */
 const byte room_temp_sensor_addr[NUM_ROOM_SENSORS][ADDR_LEN] = {
-  {0x28, 0xB9, 0x40, 0xBB, 0x03, 0x00, 0x00, 0x87},
+/* Bamboo string #1. Top to bottom: */
+  { 0x28, 0x71, 0xAE, 0xAA, 0x03, 0x00, 0x00, 0x76 },
+  { 0x28, 0xAE, 0x95, 0xAA, 0x03, 0x00, 0x00, 0x62 }, 
+  { 0x28, 0xE5, 0xA8, 0xAA, 0x03, 0x00, 0x00, 0x87 }, 
+  { 0x28, 0xB9, 0x40, 0xBB, 0x03, 0x00, 0x00, 0x87 }, 
+  { 0x28, 0xC8, 0x28, 0xBB, 0x03, 0x00, 0x00, 0x07 }, 
+  { 0x28, 0x9B, 0x70, 0xAA, 0x03, 0x00, 0x00, 0x6C } 
+  
+/* hanging string
+  { 0x28, 0x68, 0x94, 0xAA, 0x03, 0x00, 0x00, 0x82}, 
+  { 0x28, 0xD4, 0xA6, 0xAA, 0x03, 0x00, 0x00, 0xFF}, 
+  { 0x28, 0x5C, 0x8A, 0xAA, 0x03, 0x00, 0x00, 0x6D}, 
+  { 0x28, 0xE9, 0x6B, 0xAA, 0x03, 0x00, 0x00, 0x96}, 
+  { 0x28, 0x2F, 0x87, 0xAA, 0x03, 0x00, 0x00, 0x40}, 
+  { 0x28, 0x1F, 0x9F, 0xAA, 0x03, 0x00, 0x00, 0xEF}
+*/
+
+/* Copper rod line  {0x28, 0xB9, 0x40, 0xBB, 0x03, 0x00, 0x00, 0x87},
   {0x28, 0x94, 0x54, 0xBB, 0x03, 0x00, 0x00, 0x18},
   {0x28, 0xC8, 0x28, 0xBB, 0x03, 0x00, 0x00, 0x07},
   {0x28, 0x4E, 0x29, 0xBB, 0x03, 0x00, 0x00, 0x92},
   {0x28, 0xD7, 0x1B, 0xBB, 0x03, 0x00, 0x00, 0xB2},
-  {0x28, 0x65, 0x58, 0xBB, 0x03, 0x00, 0x00, 0x7C}
+  {0x28, 0x65, 0x58, 0xBB, 0x03, 0x00, 0x00, 0x7C} */
+  
 };
 const byte outdoor_temp_sensor_addr[ADDR_LEN] = { 0x28, 0x4D, 0x4F, 0xBB, 0x03, 0x00, 0x00, 0x46 };
 
@@ -45,7 +64,8 @@ float temps[NUM_ROOM_SENSORS];
 float outdoor_temp;
 
 /* Sensor heights in inches, ordered by their height from the floor (highest to lowest) */
-const float heights[NUM_ROOM_SENSORS] = { 94, 79.25, 69.5, 45, 22.5, 3.5 };
+/* copper pipe heights: const float heights[NUM_ROOM_SENSORS] = { 94, 79.25, 69.5, 45, 22.5, 3.5 }; */
+const float heights[NUM_ROOM_SENSORS] = { 96, 72, 60, 48, 24, 0 };
 
 
 // Fan control variables
@@ -57,8 +77,10 @@ byte fan_speed;
 byte serial_fan_override;
 const float delta_temp_threshold = 11.0;
 const float delta_temp_maxout = 40.0;
-const byte min_fan_speed = 60;
-const byte max_fan_speed = 111;
+// Old min & max: 60 & 111
+// 3/26/2012 Note: 111 to 180 feels chilly when the heater has been off for a while.
+const byte min_fan_speed = 105;
+const byte max_fan_speed = 140;
 
 
 
@@ -113,9 +135,11 @@ void setup() {
 //    sensors.setResolution((DeviceAddress)(room_temp_sensor_addr[sensor_idx]), TEMPERATURE_PRECISION);
 
   }
+  // Initalize temp value
+  outdoor_temp = DEVICE_DISCONNECTED;
 
   // Time section
-  setSyncProvider(RTC.get);   // the function to get the time from the RTC
+  setSyncProvider(RTC.get);   // the                                                                                                       function to get the time from the RTC
   if(timeStatus()!= timeSet) 
      Serial.println("Unable to sync with the RTC");
   else
@@ -131,9 +155,6 @@ void setup() {
 #endif
 
 }
-
-
-
 
 
 void loop() {
@@ -176,17 +197,21 @@ void loop() {
       Serial.print(" read failures on sensor ");
       Serial.println(sensor_idx);
     } else {
-      if( num_valid_readings == 0 ) {
-          temp_min = temps[sensor_idx];
-          temp_max = temps[sensor_idx];
-      } else {
-        if( temp_min > temps[sensor_idx] ) temp_min = temps[sensor_idx];
-        if( temp_max < temps[sensor_idx] ) temp_max = temps[sensor_idx];
+      // Don't include the floor temperature in the delta T calculation. 
+      if( sensor_idx != NUM_ROOM_SENSORS - 1 ) {
+        if( num_valid_readings == 0 ) {
+            temp_min = temps[sensor_idx];
+            temp_max = temps[sensor_idx];
+        } else {
+          if( temp_min > temps[sensor_idx] ) temp_min = temps[sensor_idx];
+          if( temp_max < temps[sensor_idx] ) temp_max = temps[sensor_idx];
+        }
       }
       num_valid_readings++;
     }
   }
   // Read outdoor temperature
+#ifndef NO_OUTDOOR
   memcpy(addr, outdoor_temp_sensor_addr, ADDR_LEN );
   outdoor_temp = sensors.getTempC(addr);
   read_attempts = 1;
@@ -200,6 +225,8 @@ void loop() {
     Serial.print(read_attempts);
     Serial.println(" read failures on outdoor sensor.");
   }
+#endif
+
   num_loops_since_temp_col_header++;
 
   // If the temperature difference is more than the threshold, update fan control settings for so many seconds. Also do a reality check on the reading.

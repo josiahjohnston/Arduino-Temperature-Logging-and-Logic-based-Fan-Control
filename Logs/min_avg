@@ -19,7 +19,11 @@ BEGIN {
       if( last_timestamp != 0 ) {
         printf "%s\t",last_timestamp;
         for(i=1; i<=num_dat_cols; i++) {
-          printf "%.2f\t", (readings[i]/num_readings[i]);
+          if( num_readings[i] > 0 ) {
+            printf "%.2f\t", (readings[i]/num_readings[i]);
+          } else {
+            printf "ERR\t";
+          }
         }
         printf "\n";
       }
